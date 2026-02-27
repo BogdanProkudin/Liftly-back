@@ -1,8 +1,7 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+// ============================================================================
+// GymTrack Pro — Полная Prisma Schema (все фичи)
+// База: Supabase (PostgreSQL) + Prisma ORM
+// ============================================================================
 
 generator client {
   provider = "prisma-client"
@@ -11,4 +10,1277 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+}
+
+// ============================================================================
+// 1. ПОЛЬЗОВАТЕЛИ И АВТОРИЗАЦИЯ
+// ============================================================================
+
+model User {
+  id              String    @id @default(uuid()) @db.Uuid
+  email           String    @unique
+  passwordHash    String?   @map("password_hash")
+  name            String
+  username        String    @unique
+  avatarUrl       String?   @map("avatar_url")
+  bio             String?
+  isPublic        Boolean   @default(true) @map("is_public")
+  role            UserRole  @default(USER)
+  onboardingDone  Boolean   @default(false) @map("onboarding_done")
+  locale          String    @default("en")
+  timezone        String    @default("UTC")
+  unitSystem      UnitSystem @default(METRIC) @map("unit_system")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+  deletedAt       DateTime? @map("deleted_at")
+
+  // Настройки
+  settings        UserSettings?
+
+  // OAuth провайдеры
+  oauthAccounts   OAuthAccount[]
+
+  // Тренировки
+  workouts        Workout[]
+  workoutTemplates WorkoutTemplate[]
+  programs        Program[]
+  activeProgramId String?          @db.Uuid @map("active_program_id")
+
+  // Упражнения
+  customExercises Exercise[]       @relation("CustomExercises")
+
+  // Тело
+  bodyLogs        BodyLog[]
+  bodyPhotos      BodyPhoto[]
+
+  // Питание
+  nutritionLogs   NutritionLog[]
+  meals           Meal[]
+  customFoods     Food[]           @relation("CustomFoods")
+
+  // Восстановление
+  recoveryLogs    RecoveryLog[]
+  sleepLogs       SleepLog[]
+
+  // Социальные
+  sentRequests    Friendship[]     @relation("SentRequests")
+  receivedRequests Friendship[]    @relation("ReceivedRequests")
+  feedItems       FeedItem[]
+  comments        Comment[]
+  likes           Like[]
+
+  // Gamification
+  achievements    UserAchievement[]
+  streaks         Streak[]
+  xpLogs          XpLog[]
+  level           Int              @default(1)
+  totalXp         Int              @default(0) @map("total_xp")
+
+  // Marketplace
+  trainerProfile  TrainerProfile?
+  purchasedPrograms PurchasedProgram[]
+  reviews         Review[]
+  coachingClients CoachingRelation[] @relation("CoachClients")
+  coachingCoaches CoachingRelation[] @relation("CoachCoaches")
+
+  // Подписка
+  subscription    Subscription?
+
+  // Уведомления
+  notifications   Notification[]
+  deviceTokens    DeviceToken[]
+
+  // AI
+  aiChats         AiChat[]
+
+  @@map("users")
+}
+
+model UserSettings {
+  id                  String   @id @default(uuid()) @db.Uuid
+  userId              String   @unique @db.Uuid @map("user_id")
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Тренировки
+  defaultRestSeconds  Int      @default(90) @map("default_rest_seconds")
+  showPreviousWorkout Boolean  @default(true) @map("show_previous_workout")
+  autoStartTimer      Boolean  @default(true) @map("auto_start_timer")
+  weightIncrement     Float    @default(2.5) @map("weight_increment") // кг шаг прогрессии
+
+  // Уведомления
+  restTimerSound      Boolean  @default(true) @map("rest_timer_sound")
+  workoutReminders    Boolean  @default(true) @map("workout_reminders")
+  reminderTime        String?  @map("reminder_time") // "08:00"
+  reminderDays        Int[]    @map("reminder_days")  // [1,3,5] = Пн, Ср, Пт
+  socialNotifications Boolean  @default(true) @map("social_notifications")
+  prNotifications     Boolean  @default(true) @map("pr_notifications")
+
+  // Приватность
+  showWorkoutsInFeed  Boolean  @default(true) @map("show_workouts_in_feed")
+  showBodyStats       Boolean  @default(false) @map("show_body_stats")
+
+  // Внешний вид
+  theme               Theme    @default(SYSTEM)
+
+  @@map("user_settings")
+}
+
+model OAuthAccount {
+  id          String   @id @default(uuid()) @db.Uuid
+  userId      String   @db.Uuid @map("user_id")
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider    OAuthProvider
+  providerId  String   @map("provider_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@unique([provider, providerId])
+  @@map("oauth_accounts")
+}
+
+model RefreshToken {
+  id          String   @id @default(uuid()) @db.Uuid
+  userId      String   @db.Uuid @map("user_id")
+  token       String   @unique
+  expiresAt   DateTime @map("expires_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+  revokedAt   DateTime? @map("revoked_at")
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+// ============================================================================
+// 2. УПРАЖНЕНИЯ
+// ============================================================================
+
+model Exercise {
+  id              String          @id @default(uuid()) @db.Uuid
+  name            String
+  slug            String          @unique
+  description     String?
+  instructions    String?
+  muscleGroup     MuscleGroup     @map("muscle_group")
+  secondaryMuscles MuscleGroup[]  @map("secondary_muscles")
+  equipment       Equipment
+  exerciseType    ExerciseType    @map("exercise_type")
+  mechanic        Mechanic?
+  forceType       ForceType?      @map("force_type")
+  difficulty      Difficulty      @default(INTERMEDIATE)
+  animationUrl    String?         @map("animation_url")
+  videoUrl        String?         @map("video_url")
+  thumbnailUrl    String?         @map("thumbnail_url")
+
+  // Кастомное упражнение
+  isCustom        Boolean         @default(false) @map("is_custom")
+  createdByUserId String?         @db.Uuid @map("created_by_user_id")
+  createdByUser   User?           @relation("CustomExercises", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  isActive        Boolean         @default(true) @map("is_active")
+  createdAt       DateTime        @default(now()) @map("created_at")
+  updatedAt       DateTime        @updatedAt @map("updated_at")
+
+  // Связи
+  workoutSets     WorkoutSet[]
+  templateExercises TemplateExercise[]
+  programExercises ProgramExercise[]
+  personalRecords PersonalRecord[]
+  exerciseNotes   ExerciseNote[]
+  cvAnalyses      CvAnalysis[]
+
+  @@index([muscleGroup])
+  @@index([equipment])
+  @@index([createdByUserId])
+  @@map("exercises")
+}
+
+model ExerciseNote {
+  id          String   @id @default(uuid()) @db.Uuid
+  exerciseId  String   @db.Uuid @map("exercise_id")
+  exercise    Exercise @relation(fields: [exerciseId], references: [id], onDelete: Cascade)
+  userId      String   @db.Uuid @map("user_id")
+  note        String
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@index([exerciseId, userId])
+  @@map("exercise_notes")
+}
+
+// ============================================================================
+// 3. ТРЕНИРОВКИ
+// ============================================================================
+
+model Workout {
+  id              String        @id @default(uuid()) @db.Uuid
+  userId          String        @db.Uuid @map("user_id")
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  templateId      String?       @db.Uuid @map("template_id")
+  template        WorkoutTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  programWeekDayId String?      @db.Uuid @map("program_week_day_id")
+
+  name            String?
+  notes           String?
+  startedAt       DateTime      @map("started_at")
+  finishedAt      DateTime?     @map("finished_at")
+  durationSeconds Int?          @map("duration_seconds")
+
+  // Агрегаты (денормализация для быстрых запросов)
+  totalVolume     Float?        @map("total_volume")     // кг * повторы
+  totalSets       Int?          @map("total_sets")
+  totalReps       Int?          @map("total_reps")
+  caloriesBurned  Int?          @map("calories_burned")
+
+  // Оценка
+  rating          Int?          // 1-5
+  perceivedEffort Int?          @map("perceived_effort") // 1-10
+
+  status          WorkoutStatus @default(IN_PROGRESS)
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+
+  sets            WorkoutSet[]
+  feedItems       FeedItem[]
+
+  @@index([userId, startedAt])
+  @@index([userId, status])
+  @@map("workouts")
+}
+
+model WorkoutSet {
+  id              String      @id @default(uuid()) @db.Uuid
+  workoutId       String      @db.Uuid @map("workout_id")
+  workout         Workout     @relation(fields: [workoutId], references: [id], onDelete: Cascade)
+  exerciseId      String      @db.Uuid @map("exercise_id")
+  exercise        Exercise    @relation(fields: [exerciseId], references: [id])
+
+  setNumber       Int         @map("set_number")
+  setType         SetType     @default(WORKING) @map("set_type")
+  weight          Float?      // кг или lbs
+  reps            Int?
+  durationSeconds Int?        @map("duration_seconds")   // для планки и т.д.
+  distance        Float?      // метры (для кардио)
+  rpe             Float?      // 1-10 RPE
+  rir             Int?        // Reps In Reserve
+  tempo           String?     // "3-1-2-0" формат
+  isPersonalRecord Boolean    @default(false) @map("is_personal_record")
+  notes           String?
+
+  createdAt       DateTime    @default(now()) @map("created_at")
+
+  @@index([workoutId])
+  @@index([exerciseId])
+  @@index([workoutId, exerciseId])
+  @@map("workout_sets")
+}
+
+model PersonalRecord {
+  id          String       @id @default(uuid()) @db.Uuid
+  userId      String       @db.Uuid @map("user_id")
+  exerciseId  String       @db.Uuid @map("exercise_id")
+  exercise    Exercise     @relation(fields: [exerciseId], references: [id])
+  recordType  RecordType   @map("record_type")
+  value       Float
+  reps        Int?         // для e1RM записей
+  achievedAt  DateTime     @map("achieved_at")
+  workoutSetId String?     @db.Uuid @map("workout_set_id")
+
+  @@index([userId, exerciseId])
+  @@index([userId, recordType])
+  @@map("personal_records")
+}
+
+// ============================================================================
+// 4. ШАБЛОНЫ И ПРОГРАММЫ
+// ============================================================================
+
+model WorkoutTemplate {
+  id          String              @id @default(uuid()) @db.Uuid
+  userId      String              @db.Uuid @map("user_id")
+  user        User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  muscleGroups MuscleGroup[]      @map("muscle_groups")
+  estimatedMinutes Int?           @map("estimated_minutes")
+  isPublic    Boolean             @default(false) @map("is_public")
+  usageCount  Int                 @default(0) @map("usage_count")
+  createdAt   DateTime            @default(now()) @map("created_at")
+  updatedAt   DateTime            @updatedAt @map("updated_at")
+
+  exercises   TemplateExercise[]
+  workouts    Workout[]
+  scheduledDays ScheduledWorkout[]
+
+  @@index([userId])
+  @@map("workout_templates")
+}
+
+model TemplateExercise {
+  id          String          @id @default(uuid()) @db.Uuid
+  templateId  String          @db.Uuid @map("template_id")
+  template    WorkoutTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  exerciseId  String          @db.Uuid @map("exercise_id")
+  exercise    Exercise        @relation(fields: [exerciseId], references: [id])
+  order       Int
+  sets        Int             @default(3)
+  repsMin     Int?            @map("reps_min")
+  repsMax     Int?            @map("reps_max")
+  restSeconds Int?            @map("rest_seconds")
+  notes       String?
+  supersetGroup Int?          @map("superset_group")
+
+  @@index([templateId])
+  @@map("template_exercises")
+}
+
+model ScheduledWorkout {
+  id          String          @id @default(uuid()) @db.Uuid
+  userId      String          @db.Uuid @map("user_id")
+  templateId  String          @db.Uuid @map("template_id")
+  template    WorkoutTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  date        DateTime        @db.Date
+  completed   Boolean         @default(false)
+
+  @@index([userId, date])
+  @@map("scheduled_workouts")
+}
+
+// Программы тренировок (многонедельные)
+model Program {
+  id              String          @id @default(uuid()) @db.Uuid
+  userId          String?         @db.Uuid @map("user_id")
+  user            User?           @relation(fields: [userId], references: [id], onDelete: SetNull)
+  trainerId       String?         @db.Uuid @map("trainer_id")
+
+  name            String
+  slug            String          @unique
+  description     String?
+  coverImageUrl   String?         @map("cover_image_url")
+  durationWeeks   Int             @map("duration_weeks")
+  daysPerWeek     Int             @map("days_per_week")
+  difficulty      Difficulty
+  goal            ProgramGoal
+  periodization   Periodization?
+
+  isPublic        Boolean         @default(false) @map("is_public")
+  isOfficial      Boolean         @default(false) @map("is_official")
+  isPremium       Boolean         @default(false) @map("is_premium")
+  price           Float?          // если isPremium
+
+  rating          Float?
+  reviewCount     Int             @default(0) @map("review_count")
+  purchaseCount   Int             @default(0) @map("purchase_count")
+
+  createdAt       DateTime        @default(now()) @map("created_at")
+  updatedAt       DateTime        @updatedAt @map("updated_at")
+
+  weeks           ProgramWeek[]
+  purchases       PurchasedProgram[]
+  reviews         Review[]
+
+  @@index([goal])
+  @@index([isPublic, rating])
+  @@map("programs")
+}
+
+model ProgramWeek {
+  id          String        @id @default(uuid()) @db.Uuid
+  programId   String        @db.Uuid @map("program_id")
+  program     Program       @relation(fields: [programId], references: [id], onDelete: Cascade)
+  weekNumber  Int           @map("week_number")
+  name        String?
+  deload      Boolean       @default(false)
+
+  days        ProgramWeekDay[]
+
+  @@index([programId])
+  @@map("program_weeks")
+}
+
+model ProgramWeekDay {
+  id          String            @id @default(uuid()) @db.Uuid
+  weekId      String            @db.Uuid @map("week_id")
+  week        ProgramWeek       @relation(fields: [weekId], references: [id], onDelete: Cascade)
+  dayNumber   Int               @map("day_number") // 1-7
+  name        String?
+  isRestDay   Boolean           @default(false) @map("is_rest_day")
+
+  exercises   ProgramExercise[]
+
+  @@index([weekId])
+  @@map("program_week_days")
+}
+
+model ProgramExercise {
+  id              String         @id @default(uuid()) @db.Uuid
+  dayId           String         @db.Uuid @map("day_id")
+  day             ProgramWeekDay @relation(fields: [dayId], references: [id], onDelete: Cascade)
+  exerciseId      String         @db.Uuid @map("exercise_id")
+  exercise        Exercise       @relation(fields: [exerciseId], references: [id])
+  order           Int
+  sets            Int            @default(3)
+  repsMin         Int?           @map("reps_min")
+  repsMax         Int?           @map("reps_max")
+  percentageOf1rm Float?         @map("percentage_of_1rm")
+  rpeTarget       Float?         @map("rpe_target")
+  restSeconds     Int?           @map("rest_seconds")
+  tempo           String?
+  supersetGroup   Int?           @map("superset_group")
+  notes           String?
+
+  @@index([dayId])
+  @@map("program_exercises")
+}
+
+// ============================================================================
+// 5. ТЕЛО: ВЕС, ЗАМЕРЫ, ФОТО
+// ============================================================================
+
+model BodyLog {
+  id              String    @id @default(uuid()) @db.Uuid
+  userId          String    @db.Uuid @map("user_id")
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date            DateTime  @db.Date
+  weight          Float?    // кг
+  bodyFat         Float?    @map("body_fat") // процент
+  muscleMass      Float?    @map("muscle_mass")
+
+  // Замеры (см)
+  neck            Float?
+  shoulders       Float?
+  chest           Float?
+  leftBicep       Float?    @map("left_bicep")
+  rightBicep      Float?    @map("right_bicep")
+  waist           Float?
+  hips            Float?
+  leftThigh       Float?    @map("left_thigh")
+  rightThigh      Float?    @map("right_thigh")
+  leftCalf        Float?    @map("left_calf")
+  rightCalf       Float?    @map("right_calf")
+
+  notes           String?
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  @@unique([userId, date])
+  @@index([userId, date])
+  @@map("body_logs")
+}
+
+model BodyPhoto {
+  id          String      @id @default(uuid()) @db.Uuid
+  userId      String      @db.Uuid @map("user_id")
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date        DateTime    @db.Date
+  photoUrl    String      @map("photo_url")
+  pose        PhotoPose
+  notes       String?
+  createdAt   DateTime    @default(now()) @map("created_at")
+
+  @@index([userId, date])
+  @@map("body_photos")
+}
+
+// ============================================================================
+// 6. ПИТАНИЕ
+// ============================================================================
+
+model Food {
+  id              String    @id @default(uuid()) @db.Uuid
+  barcode         String?   @unique
+  name            String
+  brand           String?
+  servingSize     Float     @map("serving_size")     // граммы
+  servingUnit     String    @default("g") @map("serving_unit")
+  calories        Float
+  protein         Float
+  carbs           Float
+  fat             Float
+  fiber           Float?
+  sugar           Float?
+  sodium          Float?
+
+  isCustom        Boolean   @default(false) @map("is_custom")
+  createdByUserId String?   @db.Uuid @map("created_by_user_id")
+  createdByUser   User?     @relation("CustomFoods", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  isVerified      Boolean   @default(false) @map("is_verified")
+
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  mealItems       MealItem[]
+
+  @@index([name])
+  @@index([barcode])
+  @@map("foods")
+}
+
+model NutritionLog {
+  id              String    @id @default(uuid()) @db.Uuid
+  userId          String    @db.Uuid @map("user_id")
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date            DateTime  @db.Date
+
+  // Цели на день
+  targetCalories  Int?      @map("target_calories")
+  targetProtein   Float?    @map("target_protein")
+  targetCarbs     Float?    @map("target_carbs")
+  targetFat       Float?    @map("target_fat")
+
+  // Фактические итоги (денормализация)
+  totalCalories   Float?    @map("total_calories")
+  totalProtein    Float?    @map("total_protein")
+  totalCarbs      Float?    @map("total_carbs")
+  totalFat        Float?    @map("total_fat")
+
+  waterMl         Int?      @map("water_ml")
+
+  meals           Meal[]
+
+  @@unique([userId, date])
+  @@index([userId, date])
+  @@map("nutrition_logs")
+}
+
+model Meal {
+  id              String        @id @default(uuid()) @db.Uuid
+  userId          String        @db.Uuid @map("user_id")
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  nutritionLogId  String        @db.Uuid @map("nutrition_log_id")
+  nutritionLog    NutritionLog  @relation(fields: [nutritionLogId], references: [id], onDelete: Cascade)
+  mealType        MealType      @map("meal_type")
+  name            String?
+  time            DateTime?
+
+  items           MealItem[]
+
+  @@index([nutritionLogId])
+  @@map("meals")
+}
+
+model MealItem {
+  id          String    @id @default(uuid()) @db.Uuid
+  mealId      String    @db.Uuid @map("meal_id")
+  meal        Meal      @relation(fields: [mealId], references: [id], onDelete: Cascade)
+  foodId      String    @db.Uuid @map("food_id")
+  food        Food      @relation(fields: [foodId], references: [id])
+  quantity    Float     // граммы или порции
+  unit        String    @default("g")
+
+  // Рассчитанные значения
+  calories    Float
+  protein     Float
+  carbs       Float
+  fat         Float
+
+  @@index([mealId])
+  @@map("meal_items")
+}
+
+// ============================================================================
+// 7. ВОССТАНОВЛЕНИЕ И WELLNESS
+// ============================================================================
+
+model RecoveryLog {
+  id              String          @id @default(uuid()) @db.Uuid
+  userId          String          @db.Uuid @map("user_id")
+  user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date            DateTime        @db.Date
+
+  recoveryScore   Int?            @map("recovery_score")   // 0-100
+  readinessScore  Int?            @map("readiness_score")  // 0-100
+  stressLevel     Int?            @map("stress_level")     // 1-10
+  mood            Int?            // 1-5
+  energyLevel     Int?            @map("energy_level")     // 1-5
+  hrv             Float?          // мс
+  restingHr       Int?            @map("resting_hr")       // bpm
+
+  // Muscle soreness map (JSON): { "chest": 3, "quads": 5, ... } (1-5)
+  soreness        Json?
+
+  notes           String?
+  createdAt       DateTime        @default(now()) @map("created_at")
+
+  @@unique([userId, date])
+  @@index([userId, date])
+  @@map("recovery_logs")
+}
+
+model SleepLog {
+  id              String    @id @default(uuid()) @db.Uuid
+  userId          String    @db.Uuid @map("user_id")
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date            DateTime  @db.Date
+  bedtime         DateTime?
+  wakeTime        DateTime? @map("wake_time")
+  durationMinutes Int?      @map("duration_minutes")
+  quality         Int?      // 1-5
+  source          String?   // "manual", "apple_health", "garmin", etc.
+
+  @@unique([userId, date])
+  @@index([userId, date])
+  @@map("sleep_logs")
+}
+
+// ============================================================================
+// 8. СОЦИАЛЬНЫЕ ФУНКЦИИ
+// ============================================================================
+
+model Friendship {
+  id          String           @id @default(uuid()) @db.Uuid
+  userId      String           @db.Uuid @map("user_id")
+  user        User             @relation("SentRequests", fields: [userId], references: [id], onDelete: Cascade)
+  friendId    String           @db.Uuid @map("friend_id")
+  friend      User             @relation("ReceivedRequests", fields: [friendId], references: [id], onDelete: Cascade)
+  status      FriendshipStatus @default(PENDING)
+  createdAt   DateTime         @default(now()) @map("created_at")
+  updatedAt   DateTime         @updatedAt @map("updated_at")
+
+  @@unique([userId, friendId])
+  @@index([friendId])
+  @@map("friendships")
+}
+
+model FeedItem {
+  id          String       @id @default(uuid()) @db.Uuid
+  userId      String       @db.Uuid @map("user_id")
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type        FeedItemType
+  workoutId   String?      @db.Uuid @map("workout_id")
+  workout     Workout?     @relation(fields: [workoutId], references: [id], onDelete: SetNull)
+  metadata    Json?        // { achievementType, recordValue, etc. }
+  createdAt   DateTime     @default(now()) @map("created_at")
+
+  comments    Comment[]
+  likes       Like[]
+
+  @@index([userId, createdAt])
+  @@index([createdAt])
+  @@map("feed_items")
+}
+
+model Comment {
+  id          String   @id @default(uuid()) @db.Uuid
+  feedItemId  String   @db.Uuid @map("feed_item_id")
+  feedItem    FeedItem @relation(fields: [feedItemId], references: [id], onDelete: Cascade)
+  userId      String   @db.Uuid @map("user_id")
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  text        String
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@index([feedItemId])
+  @@map("comments")
+}
+
+model Like {
+  id          String   @id @default(uuid()) @db.Uuid
+  feedItemId  String   @db.Uuid @map("feed_item_id")
+  feedItem    FeedItem @relation(fields: [feedItemId], references: [id], onDelete: Cascade)
+  userId      String   @db.Uuid @map("user_id")
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@unique([feedItemId, userId])
+  @@map("likes")
+}
+
+// ============================================================================
+// 9. GAMIFICATION
+// ============================================================================
+
+model Achievement {
+  id          String              @id @default(uuid()) @db.Uuid
+  key         String              @unique // "first_workout", "bench_bodyweight", "streak_30"
+  name        String
+  description String
+  iconUrl     String?             @map("icon_url")
+  category    AchievementCategory
+  condition   Json                // { type: "total_volume", threshold: 100000 }
+  xpReward    Int                 @default(0) @map("xp_reward")
+  isSecret    Boolean             @default(false) @map("is_secret")
+
+  users       UserAchievement[]
+
+  @@map("achievements")
+}
+
+model UserAchievement {
+  id            String      @id @default(uuid()) @db.Uuid
+  userId        String      @db.Uuid @map("user_id")
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  achievementId String      @db.Uuid @map("achievement_id")
+  achievement   Achievement @relation(fields: [achievementId], references: [id])
+  unlockedAt    DateTime    @default(now()) @map("unlocked_at")
+
+  @@unique([userId, achievementId])
+  @@map("user_achievements")
+}
+
+model Streak {
+  id          String     @id @default(uuid()) @db.Uuid
+  userId      String     @db.Uuid @map("user_id")
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type        StreakType
+  currentDays Int        @default(0) @map("current_days")
+  longestDays Int        @default(0) @map("longest_days")
+  lastActiveDate DateTime? @db.Date @map("last_active_date")
+  startedAt   DateTime   @default(now()) @map("started_at")
+  updatedAt   DateTime   @updatedAt @map("updated_at")
+
+  @@unique([userId, type])
+  @@map("streaks")
+}
+
+model XpLog {
+  id          String   @id @default(uuid()) @db.Uuid
+  userId      String   @db.Uuid @map("user_id")
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  amount      Int
+  source      String   // "workout_completed", "achievement_unlocked", "streak_bonus"
+  metadata    Json?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@index([userId, createdAt])
+  @@map("xp_logs")
+}
+
+model Challenge {
+  id              String              @id @default(uuid()) @db.Uuid
+  name            String
+  description     String
+  type            ChallengeType
+  target          Json                // { metric: "total_volume", value: 50000 }
+  startDate       DateTime            @map("start_date")
+  endDate         DateTime            @map("end_date")
+  createdByUserId String?             @db.Uuid @map("created_by_user_id")
+  isGlobal        Boolean             @default(false) @map("is_global")
+
+  participants    ChallengeParticipant[]
+
+  @@map("challenges")
+}
+
+model ChallengeParticipant {
+  id          String    @id @default(uuid()) @db.Uuid
+  challengeId String    @db.Uuid @map("challenge_id")
+  challenge   Challenge @relation(fields: [challengeId], references: [id], onDelete: Cascade)
+  userId      String    @db.Uuid @map("user_id")
+  progress    Float     @default(0)
+  completed   Boolean   @default(false)
+  joinedAt    DateTime  @default(now()) @map("joined_at")
+
+  @@unique([challengeId, userId])
+  @@map("challenge_participants")
+}
+
+// ============================================================================
+// 10. MARKETPLACE ТРЕНЕРОВ
+// ============================================================================
+
+model TrainerProfile {
+  id              String    @id @default(uuid()) @db.Uuid
+  userId          String    @unique @db.Uuid @map("user_id")
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  displayName     String    @map("display_name")
+  bio             String?
+  specializations String[]
+  certifications  String[]
+  socialLinks     Json?     @map("social_links") // { instagram, youtube, tiktok }
+  stripeAccountId String?   @map("stripe_account_id")
+  isVerified      Boolean   @default(false) @map("is_verified")
+  commissionRate  Float     @default(0.20) @map("commission_rate") // 20%
+  rating          Float?
+  reviewCount     Int       @default(0) @map("review_count")
+  clientCount     Int       @default(0) @map("client_count")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  @@map("trainer_profiles")
+}
+
+model PurchasedProgram {
+  id          String   @id @default(uuid()) @db.Uuid
+  userId      String   @db.Uuid @map("user_id")
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  programId   String   @db.Uuid @map("program_id")
+  program     Program  @relation(fields: [programId], references: [id])
+  price       Float
+  currency    String   @default("USD")
+  purchasedAt DateTime @default(now()) @map("purchased_at")
+  startedAt   DateTime? @map("started_at")
+  currentWeek Int      @default(1) @map("current_week")
+
+  @@unique([userId, programId])
+  @@map("purchased_programs")
+}
+
+model CoachingRelation {
+  id          String            @id @default(uuid()) @db.Uuid
+  coachId     String            @db.Uuid @map("coach_id")
+  coach       User              @relation("CoachClients", fields: [coachId], references: [id])
+  clientId    String            @db.Uuid @map("client_id")
+  client      User              @relation("CoachCoaches", fields: [clientId], references: [id])
+  status      CoachingStatus    @default(ACTIVE)
+  monthlyRate Float?            @map("monthly_rate")
+  notes       String?
+  startedAt   DateTime          @default(now()) @map("started_at")
+  endedAt     DateTime?         @map("ended_at")
+
+  messages    CoachingMessage[]
+
+  @@unique([coachId, clientId])
+  @@map("coaching_relations")
+}
+
+model CoachingMessage {
+  id          String           @id @default(uuid()) @db.Uuid
+  relationId  String           @db.Uuid @map("relation_id")
+  relation    CoachingRelation @relation(fields: [relationId], references: [id], onDelete: Cascade)
+  senderId    String           @db.Uuid @map("sender_id")
+  text        String
+  attachments Json?
+  readAt      DateTime?        @map("read_at")
+  createdAt   DateTime         @default(now()) @map("created_at")
+
+  @@index([relationId, createdAt])
+  @@map("coaching_messages")
+}
+
+model Review {
+  id          String   @id @default(uuid()) @db.Uuid
+  userId      String   @db.Uuid @map("user_id")
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  programId   String   @db.Uuid @map("program_id")
+  program     Program  @relation(fields: [programId], references: [id], onDelete: Cascade)
+  rating      Int      // 1-5
+  text        String?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@unique([userId, programId])
+  @@map("reviews")
+}
+
+// ============================================================================
+// 11. ПОДПИСКИ И ПЛАТЕЖИ
+// ============================================================================
+
+model Subscription {
+  id                String           @id @default(uuid()) @db.Uuid
+  userId            String           @unique @db.Uuid @map("user_id")
+  user              User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan              SubscriptionPlan
+  status            SubscriptionStatus @default(ACTIVE)
+  stripeCustomerId  String?          @map("stripe_customer_id")
+  stripeSubId       String?          @map("stripe_sub_id")
+  currentPeriodStart DateTime        @map("current_period_start")
+  currentPeriodEnd   DateTime        @map("current_period_end")
+  cancelAtPeriodEnd  Boolean         @default(false) @map("cancel_at_period_end")
+  createdAt         DateTime         @default(now()) @map("created_at")
+
+  @@map("subscriptions")
+}
+
+model Payment {
+  id          String        @id @default(uuid()) @db.Uuid
+  userId      String        @db.Uuid @map("user_id")
+  type        PaymentType
+  amount      Float
+  currency    String        @default("USD")
+  status      PaymentStatus
+  stripePaymentId String?   @map("stripe_payment_id")
+  metadata    Json?
+  createdAt   DateTime      @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@map("payments")
+}
+
+// ============================================================================
+// 12. AI ФУНКЦИИ
+// ============================================================================
+
+model AiChat {
+  id          String      @id @default(uuid()) @db.Uuid
+  userId      String      @db.Uuid @map("user_id")
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title       String?
+  createdAt   DateTime    @default(now()) @map("created_at")
+  updatedAt   DateTime    @updatedAt @map("updated_at")
+
+  messages    AiMessage[]
+
+  @@index([userId])
+  @@map("ai_chats")
+}
+
+model AiMessage {
+  id          String   @id @default(uuid()) @db.Uuid
+  chatId      String   @db.Uuid @map("chat_id")
+  chat        AiChat   @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  role        AiRole
+  content     String
+  metadata    Json?    // { model, tokens, context }
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@index([chatId])
+  @@map("ai_messages")
+}
+
+model AiProgramGeneration {
+  id          String   @id @default(uuid()) @db.Uuid
+  userId      String   @db.Uuid @map("user_id")
+  input       Json     // { goal, experience, days_per_week, equipment, ... }
+  output      Json     // Сгенерированная программа
+  accepted    Boolean  @default(false)
+  programId   String?  @db.Uuid @map("program_id") // если пользователь принял
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@map("ai_program_generations")
+}
+
+// ============================================================================
+// 13. COMPUTER VISION
+// ============================================================================
+
+model CvAnalysis {
+  id              String       @id @default(uuid()) @db.Uuid
+  userId          String       @db.Uuid @map("user_id")
+  exerciseId      String       @db.Uuid @map("exercise_id")
+  exercise        Exercise     @relation(fields: [exerciseId], references: [id])
+  videoUrl        String?      @map("video_url")
+  thumbnailUrl    String?      @map("thumbnail_url")
+
+  // Результаты анализа
+  overallScore    Int?         @map("overall_score")   // 0-100
+  repCount        Int?         @map("rep_count")
+  feedback        Json?        // [{ issue: "depth", severity: "warning", message: "..." }]
+  jointAngles     Json?        @map("joint_angles")    // Данные по кадрам
+  skeletonDataUrl String?      @map("skeleton_data_url") // Видео с наложенным скелетом
+
+  createdAt       DateTime     @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@map("cv_analyses")
+}
+
+// ============================================================================
+// 14. УВЕДОМЛЕНИЯ
+// ============================================================================
+
+model Notification {
+  id          String           @id @default(uuid()) @db.Uuid
+  userId      String           @db.Uuid @map("user_id")
+  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type        NotificationType
+  title       String
+  body        String
+  data        Json?
+  readAt      DateTime?        @map("read_at")
+  createdAt   DateTime         @default(now()) @map("created_at")
+
+  @@index([userId, readAt])
+  @@index([userId, createdAt])
+  @@map("notifications")
+}
+
+model DeviceToken {
+  id          String   @id @default(uuid()) @db.Uuid
+  userId      String   @db.Uuid @map("user_id")
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token       String   @unique
+  platform    Platform
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@map("device_tokens")
+}
+
+// ============================================================================
+// 15. ИНТЕГРАЦИИ (Wearables, Smart Scales, etc.)
+// ============================================================================
+
+model Integration {
+  id          String           @id @default(uuid()) @db.Uuid
+  userId      String           @db.Uuid @map("user_id")
+  provider    IntegrationProvider
+  accessToken String?          @map("access_token")
+  refreshToken String?         @map("refresh_token")
+  expiresAt   DateTime?        @map("expires_at")
+  metadata    Json?
+  isActive    Boolean          @default(true) @map("is_active")
+  createdAt   DateTime         @default(now()) @map("created_at")
+  updatedAt   DateTime         @updatedAt @map("updated_at")
+
+  @@unique([userId, provider])
+  @@map("integrations")
+}
+
+// ============================================================================
+// ENUMS
+// ============================================================================
+
+enum UserRole {
+  USER
+  TRAINER
+  ADMIN
+}
+
+enum UnitSystem {
+  METRIC
+  IMPERIAL
+}
+
+enum Theme {
+  LIGHT
+  DARK
+  SYSTEM
+}
+
+enum OAuthProvider {
+  GOOGLE
+  APPLE
+  GITHUB
+}
+
+enum MuscleGroup {
+  CHEST
+  BACK
+  SHOULDERS
+  BICEPS
+  TRICEPS
+  FOREARMS
+  ABS
+  OBLIQUES
+  QUADS
+  HAMSTRINGS
+  GLUTES
+  CALVES
+  TRAPS
+  LATS
+  LOWER_BACK
+  HIP_FLEXORS
+  ADDUCTORS
+  ABDUCTORS
+  NECK
+  FULL_BODY
+  CARDIO
+}
+
+enum Equipment {
+  BARBELL
+  DUMBBELL
+  KETTLEBELL
+  MACHINE
+  CABLE
+  BODYWEIGHT
+  BAND
+  SMITH_MACHINE
+  EZ_BAR
+  TRAP_BAR
+  SUSPENSION
+  MEDICINE_BALL
+  FOAM_ROLLER
+  OTHER
+  NONE
+}
+
+enum ExerciseType {
+  STRENGTH
+  CARDIO
+  FLEXIBILITY
+  PLYOMETRIC
+  OLYMPIC
+  ISOMETRIC
+  HIIT
+  YOGA
+}
+
+enum Mechanic {
+  COMPOUND
+  ISOLATION
+}
+
+enum ForceType {
+  PUSH
+  PULL
+  STATIC
+}
+
+enum Difficulty {
+  BEGINNER
+  INTERMEDIATE
+  ADVANCED
+  EXPERT
+}
+
+enum WorkoutStatus {
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum SetType {
+  WARMUP
+  WORKING
+  DROP_SET
+  FAILURE
+  REST_PAUSE
+  CLUSTER
+  MYOREP
+}
+
+enum RecordType {
+  MAX_WEIGHT     // Максимальный вес
+  MAX_REPS       // Максимум повторений с данным весом
+  MAX_VOLUME     // Лучший сет по объёму (вес * повторы)
+  ESTIMATED_1RM  // Расчётный 1RM
+  MAX_DURATION   // Для изометрических
+}
+
+enum ProgramGoal {
+  STRENGTH
+  HYPERTROPHY
+  POWERLIFTING
+  ENDURANCE
+  FAT_LOSS
+  GENERAL_FITNESS
+  ATHLETIC_PERFORMANCE
+  REHABILITATION
+}
+
+enum Periodization {
+  LINEAR
+  UNDULATING
+  BLOCK
+  CONJUGATE
+}
+
+enum PhotoPose {
+  FRONT
+  BACK
+  SIDE_LEFT
+  SIDE_RIGHT
+  FRONT_FLEXED
+  BACK_FLEXED
+}
+
+enum MealType {
+  BREAKFAST
+  LUNCH
+  DINNER
+  SNACK
+  PRE_WORKOUT
+  POST_WORKOUT
+}
+
+enum FriendshipStatus {
+  PENDING
+  ACCEPTED
+  BLOCKED
+}
+
+enum FeedItemType {
+  WORKOUT_COMPLETED
+  PERSONAL_RECORD
+  ACHIEVEMENT_UNLOCKED
+  STREAK_MILESTONE
+  PROGRAM_STARTED
+  PROGRAM_COMPLETED
+  CHALLENGE_WON
+  BODY_TRANSFORMATION
+}
+
+enum AchievementCategory {
+  CONSISTENCY     // стрики, регулярность
+  STRENGTH        // PR, вес
+  VOLUME          // тоннаж
+  SOCIAL          // друзья, шеринг
+  MILESTONE       // количество тренировок
+  BODY            // трансформация
+  NUTRITION       // питание
+  SPECIAL         // пасхалки
+}
+
+enum StreakType {
+  WORKOUT
+  NUTRITION_LOG
+  BODY_LOG
+}
+
+enum ChallengeType {
+  VOLUME          // кто больше объёма
+  FREQUENCY       // кто чаще тренируется
+  CONSISTENCY     // кто дольше без пропуска
+  SPECIFIC        // конкретное упражнение
+}
+
+enum CoachingStatus {
+  ACTIVE
+  PAUSED
+  ENDED
+}
+
+enum SubscriptionPlan {
+  FREE
+  PRO
+  ELITE
+  TRAINER
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  PAST_DUE
+  CANCELLED
+  EXPIRED
+  TRIALING
+}
+
+enum PaymentType {
+  SUBSCRIPTION
+  PROGRAM_PURCHASE
+  COACHING
+}
+
+enum PaymentStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REFUNDED
+}
+
+enum AiRole {
+  USER
+  ASSISTANT
+  SYSTEM
+}
+
+enum NotificationType {
+  REST_TIMER
+  WORKOUT_REMINDER
+  FRIEND_REQUEST
+  FRIEND_ACCEPTED
+  LIKE
+  COMMENT
+  PERSONAL_RECORD
+  ACHIEVEMENT
+  STREAK_WARNING
+  STREAK_LOST
+  COACHING_MESSAGE
+  PROGRAM_UPDATE
+  AI_SUGGESTION
+  SYSTEM
+}
+
+enum Platform {
+  WEB
+  IOS
+  ANDROID
+}
+
+enum IntegrationProvider {
+  APPLE_HEALTH
+  GOOGLE_FIT
+  GARMIN
+  WHOOP
+  OURA
+  FITBIT
+  STRAVA
+  WITHINGS
+  XIAOMI
 }
