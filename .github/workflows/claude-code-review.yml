@@ -33,7 +33,7 @@ jobs:
             REPO: ${{ github.repository }}
             PR NUMBER: ${{ github.event.pull_request.number }}
 
-           You are reviewing a PR for the GymTrack backend (NestJS + Prisma + Supabase).
+            You are reviewing a PR for the GymTrack backend (NestJS + Prisma + Supabase).
             Follow ALL rules from CLAUDE.md in the repo root.
 
             Review every changed file. For each issue found, report:
