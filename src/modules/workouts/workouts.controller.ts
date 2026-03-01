@@ -17,11 +17,12 @@ import {
   ApiBody,
 } from '@nestjs/swagger';
 import { WorkoutsService } from './workouts.service.js';
-import { CreateWorkoutDto } from './dto/create-workout.dto.js';
-import { FinishWorkoutDto } from './dto/finish-workout.dto.js';
-import { QueryWorkoutsDto } from './dto/query-workouts.dto.js';
+import { CreateWorkoutDto, CreateWorkoutSchema } from './dto/create-workout.dto.js';
+import { FinishWorkoutDto, FinishWorkoutSchema } from './dto/finish-workout.dto.js';
+import { QueryWorkoutsDto, QueryWorkoutsSchema } from './dto/query-workouts.dto.js';
 import { WorkoutResponseDto, WorkoutSummaryDto } from './dto/workout-response.dto.js';
 import { CurrentUser } from '../../common/decorators/current-user.decorator.js';
+import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe.js';
 
 @ApiTags('workouts')
 @ApiBearerAuth()
@@ -34,7 +35,7 @@ export class WorkoutsController {
   @ApiResponse({ status: 200, description: 'Paginated workout list', type: [WorkoutSummaryDto] })
   async findAll(
     @CurrentUser() userId: string,
-    @Query() query: QueryWorkoutsDto,
+    @Query(new ZodValidationPipe(QueryWorkoutsSchema)) query: QueryWorkoutsDto,
   ) {
     return this.workoutsService.findAll(userId, query);
   }
@@ -58,7 +59,7 @@ export class WorkoutsController {
   @ApiResponse({ status: 400, description: 'Active workout already exists' })
   async create(
     @CurrentUser() userId: string,
-    @Body() dto: CreateWorkoutDto,
+    @Body(new ZodValidationPipe(CreateWorkoutSchema)) dto: CreateWorkoutDto,
   ): Promise<WorkoutResponseDto> {
     return this.workoutsService.create(userId, dto);
   }
@@ -73,7 +74,7 @@ export class WorkoutsController {
   async finish(
     @CurrentUser() userId: string,
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: FinishWorkoutDto,
+    @Body(new ZodValidationPipe(FinishWorkoutSchema)) dto: FinishWorkoutDto,
   ): Promise<WorkoutResponseDto> {
     return this.workoutsService.finish(userId, id, dto);
   }

@@ -1,9 +1,9 @@
 import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
-import prisma from '../../database/prisma.js';
+import { PrismaService } from '../../database/prisma.service.js';
 import { CreateWorkoutInput } from './dto/create-workout.dto.js';
 import { FinishWorkoutInput } from './dto/finish-workout.dto.js';
 import { QueryWorkoutsInput } from './dto/query-workouts.dto.js';
-import { Prisma, WorkoutStatus } from 'prisma/generated/prisma/client';
+import { WorkoutStatus } from 'prisma/generated/prisma/client';
 
 interface VolumeQueryResult {
   total_volume: number;
@@ -38,10 +38,12 @@ const WORKOUT_SUMMARY_SELECT = {
 export class WorkoutsService {
   private readonly logger = new Logger(WorkoutsService.name);
 
+  constructor(private readonly prisma: PrismaService) {}
+
   async findAll(userId: string, query: QueryWorkoutsInput) {
     const limit = query.limit ?? 20;
 
-    const workouts = await prisma.workout.findMany({
+    const workouts = await this.prisma.workout.findMany({
       where: {
         userId,
         ...(query.status ? { status: query.status as WorkoutStatus } : {}),
@@ -73,7 +75,7 @@ export class WorkoutsService {
   }
 
   async findById(userId: string, workoutId: string) {
-    const workout = await prisma.workout.findUnique({
+    const workout = await this.prisma.workout.findUnique({
       where: { id: workoutId },
       select: {
         ...WORKOUT_SELECT,
@@ -105,7 +107,7 @@ export class WorkoutsService {
   }
 
   async create(userId: string, data: CreateWorkoutInput) {
-    const activeWorkout = await prisma.workout.findFirst({
+    const activeWorkout = await this.prisma.workout.findFirst({
       where: { userId, status: 'IN_PROGRESS' },
       select: { id: true },
     });
@@ -114,7 +116,7 @@ export class WorkoutsService {
       throw new BadRequestException('You already have an active workout. Finish or cancel it first.');
     }
 
-    const workout = await prisma.workout.create({
+    const workout = await this.prisma.workout.create({
       data: {
         userId,
         name: data.name ?? null,
@@ -132,7 +134,7 @@ export class WorkoutsService {
   }
 
   async finish(userId: string, workoutId: string, data: FinishWorkoutInput) {
-    const workout = await prisma.workout.findUnique({
+    const workout = await this.prisma.workout.findUnique({
       where: { id: workoutId },
       select: { id: true, userId: true, status: true, startedAt: true },
     });
@@ -149,14 +151,14 @@ export class WorkoutsService {
     const durationSeconds = Math.floor((now.getTime() - workout.startedAt.getTime()) / 1000);
 
     // Calculate aggregates from sets
-    const aggregates = await prisma.workoutSet.aggregate({
+    const aggregates = await this.prisma.workoutSet.aggregate({
       where: { workoutId },
       _count: { id: true },
       _sum: { reps: true },
     });
 
     // Calculate total volume via raw query
-    const volumeResult = await prisma.$queryRaw<VolumeQueryResult[]>`
+    const volumeResult = await this.prisma.$queryRaw<VolumeQueryResult[]>`
       SELECT COALESCE(SUM(weight * reps), 0) as total_volume
       FROM workout_sets
       WHERE workout_id = ${workoutId}::uuid
@@ -164,7 +166,7 @@ export class WorkoutsService {
 
     const totalVolume = Number(volumeResult[0]?.total_volume ?? 0);
 
-    const updated = await prisma.workout.update({
+    const updated = await this.prisma.workout.update({
       where: { id: workoutId },
       data: {
         status: 'COMPLETED',
@@ -186,7 +188,7 @@ export class WorkoutsService {
   }
 
   async cancel(userId: string, workoutId: string): Promise<void> {
-    const workout = await prisma.workout.findUnique({
+    const workout = await this.prisma.workout.findUnique({
       where: { id: workoutId },
       select: { id: true, userId: true, status: true },
     });
@@ -199,7 +201,7 @@ export class WorkoutsService {
       throw new BadRequestException('Only in-progress workouts can be cancelled');
     }
 
-    await prisma.workout.update({
+    await this.prisma.workout.update({
       where: { id: workoutId },
       data: { status: 'CANCELLED', finishedAt: new Date() },
     });
@@ -208,7 +210,7 @@ export class WorkoutsService {
   }
 
   async delete(userId: string, workoutId: string): Promise<void> {
-    const workout = await prisma.workout.findUnique({
+    const workout = await this.prisma.workout.findUnique({
       where: { id: workoutId },
       select: { id: true, userId: true },
     });
@@ -217,7 +219,7 @@ export class WorkoutsService {
       throw new NotFoundException('Workout not found');
     }
 
-    await prisma.workout.delete({
+    await this.prisma.workout.delete({
       where: { id: workoutId },
     });
 
